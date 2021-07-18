@@ -281,6 +281,37 @@ const goodToRequests = (data: { [esKeyName: string]: string | object }): Partial
 
 };
 
+const newBadRowToRequests = (data: ITomcatImport | undefined, schema: string): ITomcatImport | undefined => {
+    // TODO: Currently handles data.payload.raw.
+    console.log("New bad row payload - ", data);
+
+    if (!data) return data;
+    if (data.hasOwnProperty("querystring")) return data;
+
+    const result: ITomcatImport = {};
+
+    // Build the bad row
+    result["schema"] = schema;
+    result["encoding"] = data["encoding"];
+    result["headers"] = data["headers"];
+    result["hostname"] = data["hostname"];
+    result["ipAddress"] = data["ipAddress"];
+    result["networkUserId"] = data["userId"];
+    result["timestamp"] = data["timestamp"];
+    result["userAgent"] = data["useragent"];
+    result["path"] = "bad_rows";
+    
+    let q = [];
+    let params = data["parameters"];
+    for (var p in params) {
+        q.push(encodeURIComponent(params[p].name) + "=" + encodeURIComponent(params[p].value));
+    }
+    result["querystring"] = q.join("&");
+
+    console.log("Bad row built - ", result);
+    return result;
+}
+
 const badToRequests = (data: string[]): har.Entry[] => {
     const logs = data.map((row) => {
         if (!row.length) {
@@ -295,8 +326,26 @@ const badToRequests = (data: string[]): har.Entry[] => {
             js = row;
         }
 
-        if (typeof js === 'object' && js !== null && js.hasOwnProperty('line')) {
-            js = js.line;
+        if (typeof js == "object" && js !== null) {
+            if (js.hasOwnProperty("line")) {
+                // Older bad row format
+                js = js.line;
+            } else if (js.hasOwnProperty("schema") && js.hasOwnProperty("data")) {
+                // Newer bad row format
+                if (!/^iglu:com\.snowplowanalytics\.snowplow\.badrows/.test(js.schema)) {
+                    console.log("Unrecognized bad row iglu schema", js);
+                    return;
+                }
+
+                if (typeof js.data.payload == "string") {
+                    js = js.data.payload;
+                } else {
+                    return newBadRowToRequests(js.data.payload.raw || js.data.payload || undefined, js.schema);
+                }
+            } else {
+                console.log("Unrecognized bad row format. ", js);
+                return;
+            }
         }
 
         if (typeof js === 'string') {
